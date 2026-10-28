@@ -2,400 +2,148 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-
 <meta name="viewport"
       content="width=device-width, initial-scale=1, maximum-scale=1">
-
-<title>DVD Screensaver</title>
+<title>DVD screensaver</title>
 
 <style>
-  * {
-    box-sizing: border-box;
-    -webkit-tap-highlight-color: transparent;
-  }
-
-  html,
-  body {
+  html, body {
     margin: 0;
     width: 100%;
     height: 100%;
     overflow: hidden;
     background: #000;
-    touch-action: none;
-    overscroll-behavior: none;
-    user-select: none;
-    -webkit-user-select: none;
   }
 
   #dvd {
     position: absolute;
     left: 0;
     top: 0;
+    width: 140px;
+    height: 70px;
+
     display: block;
-    pointer-events: none;
+    object-fit: contain;
+
+    filter: brightness(0) invert(1) sepia(1)
+            saturate(10000%) hue-rotate(120deg);
 
     will-change: transform;
-    transform: translate3d(0, 0, 0);
-  }
-
-  #message {
-    position: fixed;
-    top: 16px;
-    left: 16px;
-    right: 16px;
-
-    color: #ff8080;
-    font: 16px/1.5 sans-serif;
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-    pointer-events: none;
-  }
+        }
 </style>
 </head>
 
 <body>
+<img
+  id="dvd"
+  src="dvd.png"
+  alt="DVD"
+  onerror="
+    this.style.display='none';
+    document.getElementById('error').textContent =
+      'Не удалось загрузить dvd.png. Проверь имя файла и новый APK.';
+  "
+>
 
-<canvas id="dvd"></canvas>
-<div id="message"></div>
+<div id="error"
+     style="position:fixed;left:16px;top:16px;right:16px;
+            color:#ff6666;font:16px sans-serif;z-index:10">
+</div>
 
 <script>
-(() => {
-  "use strict";
+  const logo = document.getElementById("dvd");
 
-  // ===== НАСТРОЙКИ =====
+  // Настройки
+  const SPEED = 150;       // Скорость в CSS-пикселях в секунду
+  const WIDTH_RATIO = .30; // Ширина логотипа: доля ширины экрана
+  const LOGO_ASPECT = 2.27; // Отношение ширины картинки к высоте
 
-  const SPEED = 150;          // Скорость: CSS-пиксели в секунду.
-  const WIDTH_RATIO = 0.30;   // Ширина логотипа относительно экрана.
-  const MAX_HEIGHT_RATIO = 0.35;
-
-  const COLORS = [
-    "#00ffff",
-    "#ff00ff",
-    "#ffff00",
-    "#00ff66",
-    "#ff5533",
-    "#4488ff",
-    "#ff88cc",
-    "#ffffff"
+  const colors = [
+    "#00ffff", "#ff00ff", "#ffff00", "#00ff66",
+    "#ff5533", "#4488ff", "#ff88cc", "#ffffff"
   ];
 
-  // ===== ЭЛЕМЕНТЫ И СОСТОЯНИЕ =====
-
-  const canvas = document.getElementById("dvd");
-  const message = document.getElementById("message");
-  const ctx = canvas.getContext("2d");
-
-  const image = new Image();
-
-  const axisX = { position: 20, velocity: SPEED * 0.8 };
-  const axisY = { position: 40, velocity: SPEED * 0.6 };
-
-  let logoWidth = 0;
-  let logoHeight = 0;
-  let limitX = 0;
-  let limitY = 0;
-
+  let x = 20, y = 40;
+  let vx = SPEED * .8;
+  let vy = SPEED * .6;
+  let maxX = 0, maxY = 0;
+  let lastTime = null;
   let colorIndex = 0;
-  let ready = false;
-  let exiting = false;
 
-  let previousTime = null;
-  let animationId = null;
-
-  function showMessage(text) {
-    message.textContent = text;
-  }
-
-  // ===== ВЫХОД ПО КАСАНИЮ =====
-
-  function exitScreensaver(event) {
-    if (event && event.cancelable) {
-      event.preventDefault();
-    }
-
-    if (exiting) return;
-
-    try {
-      if (
-        window.AndroidBridge &&
-        typeof window.AndroidBridge.exitScreensaver === "function"
-      ) {
-        window.AndroidBridge.exitScreensaver();
-
-        exiting = true;
-        stopAnimation();
-        return;
-      }
-
-      showMessage(
-        "Выход по касанию доступен внутри Android-заставки.
-" +
-        "В обычном браузере AndroidBridge отсутствует."
-      );
-    } catch (error) {
-      showMessage(
-        "Не удалось завершить заставку:
-" +
-        String(error)
-      );
-    }
-  }
-
-  if ("PointerEvent" in window) {
-    window.addEventListener(
-      "pointerdown",
-      exitScreensaver,
-      { capture: true, passive: false }
+  function resize() {
+    const width = Math.min(
+      innerWidth * WIDTH_RATIO,
+      innerHeight * .35 * LOGO_ASPECT
     );
-  } else {
-    window.addEventListener(
-      "touchstart",
-      exitScreensaver,
-      { capture: true, passive: false }
-    );
+    const height = width / LOGO_ASPECT;
 
-    window.addEventListener(
-      "mousedown",
-      exitScreensaver,
-      { capture: true }
-    );
-  }
+    logo.style.width = width + "px";
+    logo.style.height = height + "px";
 
-  window.addEventListener("contextmenu", event => {
-    event.preventDefault();
-  });
+    maxX = Math.max(0, innerWidth - width);
+    maxY = Math.max(0, innerHeight - height);
 
-  // ===== РИСОВАНИЕ И ПЕРЕКРАШИВАНИЕ =====
-
-  function paintLogo() {
-    if (!ready || !ctx) return;
-
-    ctx.globalCompositeOperation = "source-over";
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    ctx.drawImage(
-      image,
-      0,
-      0,
-      canvas.width,
-      canvas.height
-    );
-
-    // Цвет накладывается только на непрозрачные части PNG.
-    ctx.globalCompositeOperation = "source-in";
-    ctx.fillStyle = COLORS[colorIndex];
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    ctx.globalCompositeOperation = "source-over";
+    x = Math.max(0, Math.min(x, maxX));
+    y = Math.max(0, Math.min(y, maxY));
   }
 
   function changeColor() {
-    const offset =
-      1 + Math.floor(Math.random() * (COLORS.length - 1));
+    const hues = [0, 45, 90, 135, 180, 225, 270, 315];
 
-    colorIndex = (colorIndex + offset) % COLORS.length;
+    colorIndex = (
+      colorIndex + 1 + Math.floor(Math.random() * (hues.length - 1))
+    ) % hues.length;
 
-    paintLogo();
-  }
-
-  function updateTransform() {
-    canvas.style.transform =
-      `translate3d(${axisX.position}px, ${axisY.position}px, 0)`;
-  }
-
-  // ===== РАЗМЕРЫ =====
-
-  function resize() {
-    if (!ready) return;
-
-    const screenWidth = Math.max(1, window.innerWidth);
-    const screenHeight = Math.max(1, window.innerHeight);
-
-    const aspect = image.naturalWidth / image.naturalHeight;
-
-    logoWidth = Math.min(
-      screenWidth * WIDTH_RATIO,
-      screenHeight * MAX_HEIGHT_RATIO * aspect
-    );
-
-    logoHeight = logoWidth / aspect;
-
-    canvas.style.width = logoWidth + "px";
-    canvas.style.height = logoHeight + "px";
-
-    // Ограничиваем разрешение маленького canvas:
-    // это не полноэкранный буфер.
-    const scale = Math.min(window.devicePixelRatio || 1, 2);
-
-    canvas.width = Math.max(1, Math.round(logoWidth * scale));
-    canvas.height = Math.max(1, Math.round(logoHeight * scale));
-
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = "high";
-
-    limitX = Math.max(0, screenWidth - logoWidth);
-    limitY = Math.max(0, screenHeight - logoHeight);
-
-    axisX.position = Math.max(
-      0,
-      Math.min(axisX.position, limitX)
-    );
-
-    axisY.position = Math.max(
-      0,
-      Math.min(axisY.position, limitY)
-    );
-
-    previousTime = null;
-
-    paintLogo();
-    updateTransform();
-  }
-
-  // ===== ДВИЖЕНИЕ И ОТРАЖЕНИЯ =====
-
-  function advanceAxis(axis, limit, dt) {
-    if (limit <= 0) {
-      axis.position = 0;
-      return false;
-    }
-
-    axis.position += axis.velocity * dt;
-
-    let collided = false;
-
-    // Сохраняем перемещение, оставшееся после удара.
-    // Это исключает короткую "остановку" у границы.
-    while (axis.position < 0 || axis.position > limit) {
-      if (axis.position < 0) {
-        axis.position = -axis.position;
-        axis.velocity = Math.abs(axis.velocity);
-      } else {
-        axis.position = 2 * limit - axis.position;
-        axis.velocity = -Math.abs(axis.velocity);
-      }
-
-      collided = true;
-    }
-
-    if (axis.position === 0 && axis.velocity < 0) {
-      axis.velocity = Math.abs(axis.velocity);
-      collided = true;
-    } else if (
-      axis.position === limit &&
-      axis.velocity > 0
-    ) {
-      axis.velocity = -Math.abs(axis.velocity);
-      collided = true;
-    }
-
-    return collided;
+    logo.style.filter =
+      `brightness(0) invert(1) sepia(1) saturate(10000%) ` +
+      `hue-rotate(${hues[colorIndex]}deg)`;
   }
 
   function frame(time) {
-    animationId = null;
+    const dt = lastTime === null
+      ? 0
+      : Math.min((time - lastTime) / 1000, .05);
 
-    if (!ready || exiting || document.hidden) return;
+    lastTime = time;
 
-    if (previousTime !== null) {
-      const elapsed = (time - previousTime) / 1000;
+    x += vx * dt;
+    y += vy * dt;
 
-      // После длительной паузы не делаем огромный скачок.
-      // Обычные интервалы кадров обрабатываем полностью.
-      const dt = Math.max(0, Math.min(elapsed, 0.1));
+    let hit = false;
 
-      const hitX = advanceAxis(axisX, limitX, dt);
-      const hitY = advanceAxis(axisY, limitY, dt);
-
-      if (hitX || hitY) {
-        changeColor();
-      }
+    if (x <= 0 && vx < 0) {
+      x = 0;
+      vx = Math.abs(vx);
+      hit = true;
+    } else if (x >= maxX && vx > 0) {
+      x = maxX;
+      vx = -Math.abs(vx);
+      hit = true;
     }
 
-    previousTime = time;
-
-    updateTransform();
-
-    animationId = requestAnimationFrame(frame);
-  }
-
-  function startAnimation() {
-    if (
-      !ready ||
-      exiting ||
-      document.hidden ||
-      animationId !== null
-    ) {
-      return;
+    if (y <= 0 && vy < 0) {
+      y = 0;
+      vy = Math.abs(vy);
+      hit = true;
+    } else if (y >= maxY && vy > 0) {
+      y = maxY;
+      vy = -Math.abs(vy);
+      hit = true;
     }
 
-    previousTime = null;
-    animationId = requestAnimationFrame(frame);
+    if (hit) changeColor();
+
+    logo.style.transform = `translate(${x}px, ${y}px)`;
+    requestAnimationFrame(frame);
   }
 
-  function stopAnimation() {
-    if (animationId !== null) {
-      cancelAnimationFrame(animationId);
-      animationId = null;
-    }
-
-    previousTime = null;
-  }
-
-  // ===== СОБЫТИЯ СТРАНИЦЫ =====
-
-  window.addEventListener("resize", resize);
-
+  addEventListener("resize", resize);
   document.addEventListener("visibilitychange", () => {
-    if (document.hidden) {
-      stopAnimation();
-    } else {
-      startAnimation();
-    }
+    lastTime = null;
   });
 
-  window.addEventListener("pagehide", stopAnimation);
-  window.addEventListener("pageshow", startAnimation);
-
-  window.addEventListener("error", event => {
-    showMessage(
-      "Ошибка JavaScript:
-" +
-      (event.message || "Неизвестная ошибка")
-    );
-  });
-
-  // ===== ЗАГРУЗКА PNG =====
-
-  if (!ctx) {
-    showMessage("WebView не смог создать Canvas 2D.");
-    return;
-  }
-
-  image.onload = () => {
-    if (!image.naturalWidth || !image.naturalHeight) {
-      showMessage("У dvd.png некорректные размеры.");
-      return;
-    }
-
-    ready = true;
-    showMessage("");
-
-    resize();
-    startAnimation();
-  };
-
-  image.onerror = () => {
-    showMessage(
-      "Не удалось загрузить dvd.png.
-" +
-      "Файл должен лежать рядом с dvd.html внутри assets."
-    );
-  };
-
-  image.src = "dvd.png";
-})();
+  resize();
+  requestAnimationFrame(frame);
 </script>
-
 </body>
 </html>
