@@ -17,7 +17,7 @@ class ClockDreamService : DreamService() {
     companion object {
         const val PREFS_NAME = "screensaver_prefs"
         const val PREF_URL = "screensaver_url"
-        const val DEFAULT_URL = "https://clock.dirgafeb.my.id?mode=android"
+        const val DEFAULT_URL = "file:///android_asset/dvd.html"
     }
 
     private var webView: WebView? = null
