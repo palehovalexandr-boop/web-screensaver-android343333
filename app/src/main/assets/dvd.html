@@ -2,148 +2,470 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8">
+
 <meta name="viewport"
-      content="width=device-width, initial-scale=1, maximum-scale=1">
-<title>DVD screensaver</title>
+      content="width=device-width, initial-scale=1,
+               maximum-scale=1, user-scalable=no">
+
+<meta name="color-scheme" content="dark">
+
+<title>DVD Screensaver</title>
 
 <style>
-  html, body {
+  html,
+  body {
     margin: 0;
+    padding: 0;
     width: 100%;
     height: 100%;
     overflow: hidden;
     background: #000;
+    overscroll-behavior: none;
+  }
+
+  body {
+    position: relative;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
   }
 
   #dvd {
     position: absolute;
     left: 0;
     top: 0;
-    width: 140px;
-    height: 70px;
-
     display: block;
-    object-fit: contain;
+    pointer-events: none;
 
-    filter: brightness(0) invert(1) sepia(1)
-            saturate(10000%) hue-rotate(120deg);
-
+    transform-origin: 0 0;
     will-change: transform;
-        }
+    backface-visibility: hidden;
+  }
+
+  #message {
+    position: fixed;
+    left: 16px;
+    right: 16px;
+    top: 16px;
+    z-index: 10;
+
+    color: #ff7070;
+    font: 15px/1.5 sans-serif;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    pointer-events: none;
+  }
+
+  #stats {
+    position: fixed;
+    left: 12px;
+    bottom: 12px;
+    z-index: 5;
+
+    display: none;
+    color: #999;
+    font: 12px/1.4 monospace;
+    pointer-events: none;
+  }
 </style>
 </head>
 
 <body>
-<img
-  id="dvd"
-  src="dvd.png"
-  alt="DVD"
-  onerror="
-    this.style.display='none';
-    document.getElementById('error').textContent =
-      'Не удалось загрузить dvd.png. Проверь имя файла и новый APK.';
-  "
->
 
-<div id="error"
-     style="position:fixed;left:16px;top:16px;right:16px;
-            color:#ff6666;font:16px sans-serif;z-index:10">
-</div>
+<canvas id="dvd"></canvas>
+<div id="message"></div>
+<div id="stats"></div>
 
 <script>
-  const logo = document.getElementById("dvd");
+"use strict";
 
-  // Настройки
-  const SPEED = 150;       // Скорость в CSS-пикселях в секунду
-  const WIDTH_RATIO = .30; // Ширина логотипа: доля ширины экрана
-  const LOGO_ASPECT = 2.27; // Отношение ширины картинки к высоте
+(() => {
+  /*
+   * НАСТРОЙКИ
+   */
+  const CONFIG = {
+    image: "dvd.png",
 
-  const colors = [
-    "#00ffff", "#ff00ff", "#ffff00", "#00ff66",
-    "#ff5533", "#4488ff", "#ff88cc", "#ffffff"
+    // Полная скорость движения в CSS-пикселях в секунду.
+    speed: 150,
+
+    // Ширина логотипа относительно ширины экрана.
+    widthRatio: 0.30,
+
+    // Ограничение высоты на невысоком экране.
+    maxHeightRatio: 0.30,
+
+    // Угол движения: 45 = одинаковая скорость по обеим осям.
+    angleDegrees: 45,
+
+    // Плотность Canvas. 2 обычно достаточно для логотипа.
+    maxPixelRatio: 2,
+
+    // true — показать диагностический счётчик кадров.
+    showStats: false
+  };
+
+  /*
+   * Реальные цвета заливки — без CSS-фильтров.
+   * Серого, белого и пастельных цветов здесь нет.
+   */
+  const COLORS = [
+    "#ff0000", // красный
+    "#ff8000", // оранжевый
+    "#ffff00", // жёлтый
+    "#80ff00", // салатовый
+    "#00ff00", // зелёный
+    "#00ff80", // зелёно-бирюзовый
+    "#00ffff", // голубой
+    "#0080ff", // лазурный
+    "#3040ff", // яркий синий
+    "#8000ff", // фиолетовый
+    "#ff00ff", // пурпурный
+    "#ff0080"  // малиновый
   ];
 
-  let x = 20, y = 40;
-  let vx = SPEED * .8;
-  let vy = SPEED * .6;
-  let maxX = 0, maxY = 0;
-  let lastTime = null;
-  let colorIndex = 0;
+  const canvas = document.getElementById("dvd");
+  const message = document.getElementById("message");
+  const stats = document.getElementById("stats");
 
-  function resize() {
-    const width = Math.min(
-      innerWidth * WIDTH_RATIO,
-      innerHeight * .35 * LOGO_ASPECT
+  const ctx = canvas.getContext("2d");
+  const image = new Image();
+
+  if (!ctx) {
+    message.textContent = "WebView не смог создать Canvas 2D.";
+    return;
+  }
+
+  let ready = false;
+  let failed = false;
+
+  let width = 0;
+  let height = 0;
+  let maxX = 0;
+  let maxY = 0;
+
+  let x = 0;
+  let y = 0;
+
+  const angle = CONFIG.angleDegrees * Math.PI / 180;
+  let vx = CONFIG.speed * Math.cos(angle);
+  let vy = CONFIG.speed * Math.sin(angle);
+
+  let colorIndex = Math.floor(Math.random() * COLORS.length);
+  let colorBag = [];
+
+  let frameId = null;
+  let previousTime = null;
+
+  let statsStart = null;
+  let statsFrames = 0;
+  let statsLongFrames = 0;
+
+  function fail(text) {
+    failed = true;
+
+    if (frameId !== null) {
+      cancelAnimationFrame(frameId);
+      frameId = null;
+    }
+
+    canvas.style.display = "none";
+    message.textContent = text;
+  }
+
+  /*
+   * Перемешанная палитра:
+   * каждый цвет встречается один раз за цикл.
+   * Непосредственный повтор исключён и между циклами.
+   */
+  function refillColorBag() {
+    colorBag = COLORS.map((_, index) => index);
+
+    for (let i = colorBag.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const temporary = colorBag[i];
+      colorBag[i] = colorBag[j];
+      colorBag[j] = temporary;
+    }
+
+    const last = colorBag.length - 1;
+
+    if (colorBag[last] === colorIndex) {
+      const temporary = colorBag[last];
+      colorBag[last] = colorBag[0];
+      colorBag[0] = temporary;
+    }
+  }
+
+  /*
+   * Рисуем PNG и заменяем цвет всех непрозрачных пикселей.
+   * Прозрачность и сглаживание краёв сохраняются.
+   *
+   * Чтение пикселей через getImageData не используется.
+   */
+  function paintLogo() {
+    ctx.globalCompositeOperation = "source-over";
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    ctx.drawImage(
+      image,
+      0,
+      0,
+      canvas.width,
+      canvas.height
     );
-    const height = width / LOGO_ASPECT;
 
-    logo.style.width = width + "px";
-    logo.style.height = height + "px";
+    ctx.globalCompositeOperation = "source-in";
+    ctx.fillStyle = COLORS[colorIndex];
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    maxX = Math.max(0, innerWidth - width);
-    maxY = Math.max(0, innerHeight - height);
-
-    x = Math.max(0, Math.min(x, maxX));
-    y = Math.max(0, Math.min(y, maxY));
+    ctx.globalCompositeOperation = "source-over";
   }
 
   function changeColor() {
-    const hues = [0, 45, 90, 135, 180, 225, 270, 315];
+    if (colorBag.length === 0) {
+      refillColorBag();
+    }
 
-    colorIndex = (
-      colorIndex + 1 + Math.floor(Math.random() * (hues.length - 1))
-    ) % hues.length;
+    colorIndex = colorBag.pop();
+    paintLogo();
+  }
 
-    logo.style.filter =
-      `brightness(0) invert(1) sepia(1) saturate(10000%) ` +
-      `hue-rotate(${hues[colorIndex]}deg)`;
+  function updatePosition() {
+    canvas.style.transform =
+      `translate3d(${x}px, ${y}px, 0)`;
+  }
+
+  function resize() {
+    if (!ready || failed) return;
+
+    const screenWidth = Math.max(1, window.innerWidth);
+    const screenHeight = Math.max(1, window.innerHeight);
+    const aspect = image.naturalWidth / image.naturalHeight;
+
+    width = Math.max(
+      1,
+      Math.min(
+        screenWidth * CONFIG.widthRatio,
+        screenHeight * CONFIG.maxHeightRatio * aspect,
+        screenWidth,
+        screenHeight * aspect
+      )
+    );
+
+    height = width / aspect;
+
+    maxX = Math.max(0, screenWidth - width);
+    maxY = Math.max(0, screenHeight - height);
+
+    const pixelRatio = Math.max(
+      1,
+      Math.min(
+        window.devicePixelRatio || 1,
+        CONFIG.maxPixelRatio
+      )
+    );
+
+    canvas.style.width = width + "px";
+    canvas.style.height = height + "px";
+
+    canvas.width = Math.max(1, Math.round(width * pixelRatio));
+    canvas.height = Math.max(1, Math.round(height * pixelRatio));
+
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+
+    x = Math.max(0, Math.min(x, maxX));
+    y = Math.max(0, Math.min(y, maxY));
+
+    paintLogo();
+    updatePosition();
+    previousTime = null;
+  }
+
+  function updateStats(time, dt) {
+    if (!CONFIG.showStats) return;
+
+    if (statsStart === null) {
+      statsStart = time;
+    }
+
+    statsFrames++;
+
+    if (dt > 0.025) {
+      statsLongFrames++;
+    }
+
+    const elapsed = time - statsStart;
+
+    if (elapsed >= 1000) {
+      const fps = statsFrames * 1000 / elapsed;
+
+      stats.textContent =
+        `rAF: ${fps.toFixed(1)}/с | ` +
+        `интервалы >25 мс: ${statsLongFrames}`;
+
+      statsStart = time;
+      statsFrames = 0;
+      statsLongFrames = 0;
+    }
   }
 
   function frame(time) {
-    const dt = lastTime === null
-      ? 0
-      : Math.min((time - lastTime) / 1000, .05);
+    frameId = null;
 
-    lastTime = time;
+    if (!ready || failed || document.hidden) return;
+
+    let dt = 0;
+
+    if (previousTime !== null) {
+      dt = Math.max(0, (time - previousTime) / 1000);
+    }
+
+    previousTime = time;
+
+    updateStats(time, dt);
+
+    /*
+     * После длительной остановки не переносим логотип
+     * скачком через весь экран.
+     * Обычные пропуски кадров учитываются полностью.
+     */
+    if (dt > 0.25) {
+      dt = 0;
+    }
 
     x += vx * dt;
     y += vy * dt;
 
     let hit = false;
 
-    if (x <= 0 && vx < 0) {
+    /*
+     * Отражение с сохранением остатка расстояния.
+     * Не "прилипаем" к границе на один кадр.
+     */
+    if (maxX > 0) {
+      while (x < 0 || x > maxX) {
+        if (x < 0) {
+          x = -x;
+          vx = Math.abs(vx);
+        } else {
+          x = 2 * maxX - x;
+          vx = -Math.abs(vx);
+        }
+
+        hit = true;
+      }
+    } else {
       x = 0;
-      vx = Math.abs(vx);
-      hit = true;
-    } else if (x >= maxX && vx > 0) {
-      x = maxX;
-      vx = -Math.abs(vx);
-      hit = true;
     }
 
-    if (y <= 0 && vy < 0) {
+    if (maxY > 0) {
+      while (y < 0 || y > maxY) {
+        if (y < 0) {
+          y = -y;
+          vy = Math.abs(vy);
+        } else {
+          y = 2 * maxY - y;
+          vy = -Math.abs(vy);
+        }
+
+        hit = true;
+      }
+    } else {
       y = 0;
-      vy = Math.abs(vy);
-      hit = true;
-    } else if (y >= maxY && vy > 0) {
-      y = maxY;
-      vy = -Math.abs(vy);
-      hit = true;
     }
 
-    if (hit) changeColor();
+    if (hit) {
+      changeColor();
+    }
 
-    logo.style.transform = `translate(${x}px, ${y}px)`;
-    requestAnimationFrame(frame);
+    updatePosition();
+    frameId = requestAnimationFrame(frame);
   }
 
-  addEventListener("resize", resize);
+  function start() {
+    if (
+      !ready ||
+      failed ||
+      document.hidden ||
+      frameId !== null
+    ) {
+      return;
+    }
+
+    previousTime = null;
+
+    statsStart = null;
+    statsFrames = 0;
+    statsLongFrames = 0;
+
+    frameId = requestAnimationFrame(frame);
+  }
+
+  function pause() {
+    if (frameId !== null) {
+      cancelAnimationFrame(frameId);
+      frameId = null;
+    }
+
+    previousTime = null;
+  }
+
+  image.onload = () => {
+    if (!image.naturalWidth || !image.naturalHeight) {
+      fail("dvd.png загрузился, но имеет некорректный размер.");
+      return;
+    }
+
+    ready = true;
+
+    resize();
+
+    x = maxX * 0.23;
+    y = maxY * 0.31;
+
+    updatePosition();
+    message.textContent = "";
+
+    if (CONFIG.showStats) {
+      stats.style.display = "block";
+    }
+
+    start();
+  };
+
+  image.onerror = () => {
+    fail(
+      "Не удалось загрузить dvd.png.
+
+" +
+      "Проверь, что рядом с dvd.html лежит файл dvd.png " +
+      "и установлен APK из последней сборки."
+    );
+  };
+
+  window.addEventListener("resize", resize);
+
   document.addEventListener("visibilitychange", () => {
-    lastTime = null;
+    if (document.hidden) {
+      pause();
+    } else {
+      start();
+    }
   });
 
-  resize();
-  requestAnimationFrame(frame);
+  window.addEventListener("pagehide", pause);
+  window.addEventListener("pageshow", start);
+
+  window.addEventListener("error", event => {
+    fail("Ошибка JavaScript:
+" + event.message);
+  });
+
+  image.src = CONFIG.image;
+})();
 </script>
+
 </body>
 </html>
