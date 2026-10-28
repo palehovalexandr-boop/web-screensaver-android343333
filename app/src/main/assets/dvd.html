@@ -21,18 +21,34 @@
     top: 0;
     width: 140px;
     height: 70px;
-    background: #00ffff;
 
-    -webkit-mask: url("dvd.png") center / contain no-repeat;
-    mask: url("dvd.png") center / contain no-repeat;
+    display: block;
+    object-fit: contain;
+
+    filter: brightness(0) invert(1) sepia(1)
+            saturate(10000%) hue-rotate(120deg);
 
     will-change: transform;
-  }
+        }
 </style>
 </head>
 
 <body>
-<div id="dvd"></div>
+<img
+  id="dvd"
+  src="dvd.png"
+  alt="DVD"
+  onerror="
+    this.style.display='none';
+    document.getElementById('error').textContent =
+      'Не удалось загрузить dvd.png. Проверь имя файла и новый APK.';
+  "
+>
+
+<div id="error"
+     style="position:fixed;left:16px;top:16px;right:16px;
+            color:#ff6666;font:16px sans-serif;z-index:10">
+</div>
 
 <script>
   const logo = document.getElementById("dvd");
@@ -72,11 +88,15 @@
   }
 
   function changeColor() {
-    colorIndex = (
-      colorIndex + 1 + Math.floor(Math.random() * (colors.length - 1))
-    ) % colors.length;
+    const hues = [0, 45, 90, 135, 180, 225, 270, 315];
 
-    logo.style.backgroundColor = colors[colorIndex];
+    colorIndex = (
+      colorIndex + 1 + Math.floor(Math.random() * (hues.length - 1))
+    ) % hues.length;
+
+    logo.style.filter =
+      `brightness(0) invert(1) sepia(1) saturate(10000%) ` +
+      `hue-rotate(${hues[colorIndex]}deg)`;
   }
 
   function frame(time) {
