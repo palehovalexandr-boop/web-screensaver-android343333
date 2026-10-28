@@ -33,7 +33,7 @@ class ClockDreamService : DreamService() {
         super.onAttachedToWindow()
 
         // Allow user touch interaction
-        isInteractive = true
+        isInteractive = false
 
         // Run in full screen, hide navigation bar and status bar
         isFullscreen = true
