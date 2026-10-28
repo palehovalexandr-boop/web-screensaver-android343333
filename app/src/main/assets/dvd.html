@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>DVD screensaver</title>
+
+<style>
+  html, body {
+    margin: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #000;
+  }
+
+  #dvd {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 140px;
+    height: 70px;
+    background: #00ffff;
+
+    -webkit-mask: url("dvd.png") center / contain no-repeat;
+    mask: url("dvd.png") center / contain no-repeat;
+
+    will-change: transform;
+  }
+</style>
+</head>
+
+<body>
+<div id="dvd"></div>
+
+<script>
+  const logo = document.getElementById("dvd");
+
+  // Настройки
+  const SPEED = 150;       // Скорость в CSS-пикселях в секунду
+  const WIDTH_RATIO = .30; // Ширина логотипа: доля ширины экрана
+  const LOGO_ASPECT = 2.27; // Отношение ширины картинки к высоте
+
+  const colors = [
+    "#00ffff", "#ff00ff", "#ffff00", "#00ff66",
+    "#ff5533", "#4488ff", "#ff88cc", "#ffffff"
+  ];
+
+  let x = 20, y = 40;
+  let vx = SPEED * .8;
+  let vy = SPEED * .6;
+  let maxX = 0, maxY = 0;
+  let lastTime = null;
+  let colorIndex = 0;
+
+  function resize() {
+    const width = Math.min(
+      innerWidth * WIDTH_RATIO,
+      innerHeight * .35 * LOGO_ASPECT
+    );
+    const height = width / LOGO_ASPECT;
+
+    logo.style.width = width + "px";
+    logo.style.height = height + "px";
+
+    maxX = Math.max(0, innerWidth - width);
+    maxY = Math.max(0, innerHeight - height);
+
+    x = Math.max(0, Math.min(x, maxX));
+    y = Math.max(0, Math.min(y, maxY));
+  }
+
+  function changeColor() {
+    colorIndex = (
+      colorIndex + 1 + Math.floor(Math.random() * (colors.length - 1))
+    ) % colors.length;
+
+    logo.style.backgroundColor = colors[colorIndex];
+  }
+
+  function frame(time) {
+    const dt = lastTime === null
+      ? 0
+      : Math.min((time - lastTime) / 1000, .05);
+
+    lastTime = time;
+
+    x += vx * dt;
+    y += vy * dt;
+
+    let hit = false;
+
+    if (x <= 0 && vx < 0) {
+      x = 0;
+      vx = Math.abs(vx);
+      hit = true;
+    } else if (x >= maxX && vx > 0) {
+      x = maxX;
+      vx = -Math.abs(vx);
+      hit = true;
+    }
+
+    if (y <= 0 && vy < 0) {
+      y = 0;
+      vy = Math.abs(vy);
+      hit = true;
+    } else if (y >= maxY && vy > 0) {
+      y = maxY;
+      vy = -Math.abs(vy);
+      hit = true;
+    }
+
+    if (hit) changeColor();
+
+    logo.style.transform = `translate(${x}px, ${y}px)`;
+    requestAnimationFrame(frame);
+  }
+
+  addEventListener("resize", resize);
+  document.addEventListener("visibilitychange", () => {
+    lastTime = null;
+  });
+
+  resize();
+  requestAnimationFrame(frame);
+</script>
+</body>
+</html>
