@@ -435,11 +435,9 @@
     start();
   };
 
-  image.onerror = () => {
+    image.onerror = () => {
     fail(
-      "Не удалось загрузить dvd.png.
-
-" +
+      "Не удалось загрузить dvd.png. " +
       "Проверь, что рядом с dvd.html лежит файл dvd.png " +
       "и установлен APK из последней сборки."
     );
@@ -459,8 +457,7 @@
   window.addEventListener("pageshow", start);
 
   window.addEventListener("error", event => {
-    fail("Ошибка JavaScript:
-" + event.message);
+    fail("Ошибка JavaScript: " + event.message);
   });
 
   image.src = CONFIG.image;
